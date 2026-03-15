@@ -75,3 +75,6 @@ Desktop.ini
 
 # PlasticSCM
 .plastic/
+
+UserSettings/
+ignore.conf
