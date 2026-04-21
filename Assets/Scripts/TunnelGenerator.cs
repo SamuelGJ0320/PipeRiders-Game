@@ -45,11 +45,20 @@ public class TunnelGenerator : MonoBehaviour
     public bool generarObstaculosAlIniciar = true;
     [Tooltip("Semilla para generacion reproducible. Con el mismo valor, se obtiene el mismo resultado.")]
     public int semilla = 0;
+    [Header("Color del Tunel")]
+    public bool colorearTunel = true;
 
     [HideInInspector]
     public List<GameObject> obstaculosGenerados = new List<GameObject>();
 
+    [SerializeField, HideInInspector]
     private List<GameObject> segmentosGenerados = new List<GameObject>();
+    private MaterialPropertyBlock bloqueProps;
+    private static readonly int PropSegmentStartMeters = Shader.PropertyToID("_SegmentStartMeters");
+    private static readonly int PropSegmentLengthMeters = Shader.PropertyToID("_SegmentLengthMeters");
+    private static readonly int PropMetersPerColor = Shader.PropertyToID("_MetersPerColor");
+    private static readonly int PropTransitionMeters = Shader.PropertyToID("_TransitionMeters");
+    private static readonly int PropLaneCount = Shader.PropertyToID("_LaneCount");
     private GameObject jugador;
     [HideInInspector]
     public List<Vector3> puntosAltaResolucion = new List<Vector3>();
@@ -57,6 +66,17 @@ public class TunnelGenerator : MonoBehaviour
     public List<Vector3> tangentesAltaResolucion = new List<Vector3>();
     [HideInInspector]
     public List<float> rollsAltaResolucion = new List<float>();
+
+    void Awake()
+    {
+        bloqueProps = new MaterialPropertyBlock();
+    }
+
+    void OnValidate()
+    {
+        // Permite previsualizar cambios de color desde inspector sin regenerar el tunel.
+        AplicarParametrosShaderTunelPorLongitud();
+    }
 
     void Start()
     {
@@ -211,6 +231,126 @@ public class TunnelGenerator : MonoBehaviour
         rollsAltaResolucion.Clear();
     }
 
+    void AplicarParametrosShaderTunelPorLongitud()
+    {
+        if (segmentosGenerados == null || segmentosGenerados.Count == 0)
+        {
+            ReconstruirListaSegmentosDesdeHijos();
+        }
+
+        if (!colorearTunel || segmentosGenerados == null || segmentosGenerados.Count == 0)
+        {
+            return;
+        }
+
+        if (bloqueProps == null)
+        {
+            bloqueProps = new MaterialPropertyBlock();
+        }
+
+        int total = segmentosGenerados.Count;
+        const int coloresActivos = 7;
+        float largoTotalTunel = Mathf.Max(0.1f, total * Mathf.Max(0.1f, longitudSegmento));
+        float metrosBloque = Mathf.Max(0.1f, largoTotalTunel / coloresActivos);
+        float metrosTransicion = Mathf.Clamp(metrosBloque * 0.35f, 0.25f, metrosBloque * 0.9f);
+        float largoSegmento = Mathf.Max(0.1f, longitudSegmento);
+        int carrilesVisuales = 8;
+        LanePlayerControllerCurvo playerCarriles = Object.FindFirstObjectByType<LanePlayerControllerCurvo>();
+        if (playerCarriles != null)
+        {
+            carrilesVisuales = Mathf.Max(2, playerCarriles.numCarriles);
+        }
+
+        for (int i = 0; i < total; i++)
+        {
+            GameObject seg = segmentosGenerados[i];
+            if (seg == null)
+            {
+                continue;
+            }
+
+            float distanciaInicioSegmento = i * largoSegmento;
+
+            Renderer[] renderers = seg.GetComponentsInChildren<Renderer>();
+            for (int r = 0; r < renderers.Length; r++)
+            {
+                Renderer renderer = renderers[r];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                Material[] mats = renderer.sharedMaterials;
+                if (mats == null || mats.Length == 0)
+                {
+                    continue;
+                }
+
+                for (int m = 0; m < mats.Length; m++)
+                {
+                    Material mat = mats[m];
+                    if (mat == null)
+                    {
+                        continue;
+                    }
+
+                    if (!mat.HasProperty("_SegmentStartMeters") || !mat.HasProperty("_SegmentLengthMeters"))
+                    {
+                        continue;
+                    }
+
+                    bloqueProps.Clear();
+                    bloqueProps.SetFloat(PropSegmentStartMeters, distanciaInicioSegmento);
+                    bloqueProps.SetFloat(PropSegmentLengthMeters, largoSegmento);
+                    if (mat.HasProperty("_MetersPerColor")) bloqueProps.SetFloat(PropMetersPerColor, metrosBloque);
+                    if (mat.HasProperty("_TransitionMeters")) bloqueProps.SetFloat(PropTransitionMeters, metrosTransicion);
+                    if (mat.HasProperty("_LaneCount")) bloqueProps.SetFloat(PropLaneCount, carrilesVisuales);
+                    renderer.SetPropertyBlock(bloqueProps, m);
+                }
+            }
+        }
+    }
+
+    void ReconstruirListaSegmentosDesdeHijos()
+    {
+        if (segmentosGenerados == null)
+        {
+            segmentosGenerados = new List<GameObject>();
+        }
+
+        segmentosGenerados.Clear();
+        for (int i = 0; i < transform.childCount; i++)
+        {
+            Transform child = transform.GetChild(i);
+            if (child == null)
+            {
+                continue;
+            }
+
+            if (child.GetComponent<TunnelSpawnPoint>() != null)
+            {
+                continue;
+            }
+
+            if (child.CompareTag("Obstacle"))
+            {
+                continue;
+            }
+
+            if (child.GetComponentInChildren<Renderer>() == null)
+            {
+                continue;
+            }
+
+            segmentosGenerados.Add(child.gameObject);
+        }
+    }
+
+    public void RefrescarColorTunelDesdeInspector()
+    {
+        AplicarParametrosShaderTunelPorLongitud();
+    }
+
     void EncontrarSpawnPoints()
     {
         spawnPoints.Clear();
@@ -332,6 +472,8 @@ public class TunnelGenerator : MonoBehaviour
             posicion += Vector3.forward * longitudSegmento;
             totalSegmentosGenerados++;
         }
+
+        AplicarParametrosShaderTunelPorLongitud();
     }
 
     void GenerarTunelConCurvas()
@@ -470,6 +612,8 @@ public class TunnelGenerator : MonoBehaviour
             segmentosGenerados.Add(segmento);
             totalSegmentosGenerados++;
         }
+
+        AplicarParametrosShaderTunelPorLongitud();
 
         Debug.Log($"Tunel generado con {totalSegmentosGenerados} segmentos.");
     }
@@ -778,15 +922,15 @@ public class TunnelGenerator : MonoBehaviour
         switch (Mathf.Clamp(nivel, 1, 5))
         {
             case 1:
-                return new LevelObstacleConfig(4, 2, 8, 16, 6);
-            case 2:
                 return new LevelObstacleConfig(5, 3, 10, 20, 5);
+            case 2:
+                return new LevelObstacleConfig(7, 4, 14, 26, 4);
             case 3:
-                return new LevelObstacleConfig(6, 4, 12, 24, 5);
+                return new LevelObstacleConfig(9, 6, 18, 32, 4);
             case 4:
-                return new LevelObstacleConfig(7, 5, 14, 28, 4);
+                return new LevelObstacleConfig(11, 8, 22, 38, 3);
             default:
-                return new LevelObstacleConfig(8, 6, 16, 32, 4);
+                return new LevelObstacleConfig(9, 7, 18, 30, 4);
         }
     }
 
@@ -820,6 +964,7 @@ public class TunnelGeneratorEditor : UnityEditor.Editor
         DrawDefaultInspector();
 
         TunnelGenerator gen = (TunnelGenerator)target;
+
         GUILayout.Space(10);
         GUILayout.Label("Generacion Procedural de Niveles", UnityEditor.EditorStyles.boldLabel);
 
@@ -849,9 +994,17 @@ public class TunnelGeneratorEditor : UnityEditor.Editor
             gen.LimpiarObstaculos();
         }
 
+        GUILayout.Space(8);
+        GUILayout.Label("Color (Shader)", UnityEditor.EditorStyles.boldLabel);
+        if (GUILayout.Button("Aplicar Color Shader"))
+        {
+            gen.RefrescarColorTunelDesdeInspector();
+        }
+
         if (GUI.changed)
         {
             UnityEditor.EditorUtility.SetDirty(gen);
+            gen.RefrescarColorTunelDesdeInspector();
         }
     }
 }
