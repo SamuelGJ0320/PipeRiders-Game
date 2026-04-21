@@ -70,6 +70,7 @@ public class LanePlayerControllerCurvo : MonoBehaviour
 
     private int carrilActual = 0;
     private float carrilInterpolado = 0f;
+    private float carrilObjetivoInterpolado = 0f;
     private float avanceCurva = 0f;
     private float velocidadActual;
     private List<Vector3> puntosCurva;
@@ -78,6 +79,8 @@ public class LanePlayerControllerCurvo : MonoBehaviour
     [Header("Cámara Pipe Riders")]
     public Transform camaraPipeRiders;
     public float suavidadCamara = 0.15f;
+    [Range(0.7f, 1.3f)]
+    public float multiplicadorDistanciaCamara = 0.92f;
     [Header("Visual Moto")]
     [Tooltip("Arrastra aqui el child visual de la moto para mantenerla derecha (sin voltearse).")]
     public Transform visualMoto;
@@ -140,6 +143,10 @@ public class LanePlayerControllerCurvo : MonoBehaviour
     private GUIStyle estiloMenuAyuda;
     private Texture2D texturaBlancaUI;
     private int opcionMenuInicioSeleccionada = 0;
+    private bool enMenuAjustes = false;
+    private int opcionMenuAjustesSeleccionada = 0;
+    private int indicePresetFpsSeleccionado = 0;
+    private static readonly int[] presetsFps = new int[] { 60, 120, 144, 165, 240 };
 
     void OnValidate()
     {
@@ -157,6 +164,7 @@ public class LanePlayerControllerCurvo : MonoBehaviour
         fuerzaImpulsoInclinacionVisual = Mathf.Clamp(fuerzaImpulsoInclinacionVisual, 0f, 3f);
         velocidadCaidaImpulsoVisual = Mathf.Max(0.1f, velocidadCaidaImpulsoVisual);
         escalaTituloMenu = Mathf.Clamp(escalaTituloMenu, 0.7f, 1.5f);
+        multiplicadorDistanciaCamara = Mathf.Clamp(multiplicadorDistanciaCamara, 0.7f, 1.3f);
 
         AsegurarTiemposObjetivo();
         AsegurarMusicaPorNivel();
@@ -201,6 +209,7 @@ public class LanePlayerControllerCurvo : MonoBehaviour
 
         carrilActual = numCarriles / 2;
         carrilInterpolado = carrilActual;
+        carrilObjetivoInterpolado = carrilActual;
         velocidadInicialNivel = Mathf.Max(2f, velocidadBase * Mathf.Clamp01(velocidadInicialFactor));
         velocidadActual = 0f;
         avanceCurva = 0f;
@@ -258,6 +267,8 @@ public class LanePlayerControllerCurvo : MonoBehaviour
             visualMotoPosInicialLocal = visualMoto.localPosition;
             visualMotoInicialCapturada = true;
         }
+
+        indicePresetFpsSeleccionado = ObtenerIndicePresetMasCercano(RuntimeFramePacing.ObtenerFpsConfigurado());
 
         // La colision con obstaculos requiere Rigidbody + Collider en el player.
     }
@@ -386,7 +397,14 @@ public class LanePlayerControllerCurvo : MonoBehaviour
 
         if (enPantallaInicio)
         {
-            DibujarMenuInicioProfesional();
+            if (enMenuAjustes)
+            {
+                DibujarMenuAjustes();
+            }
+            else
+            {
+                DibujarMenuInicioProfesional();
+            }
             return;
         }
 
@@ -572,6 +590,9 @@ public class LanePlayerControllerCurvo : MonoBehaviour
         velocidadActual = 0f;
         tiempoTranscurrido = 0f;
         opcionMenuInicioSeleccionada = 0;
+        enMenuAjustes = false;
+        opcionMenuAjustesSeleccionada = 0;
+        indicePresetFpsSeleccionado = ObtenerIndicePresetMasCercano(RuntimeFramePacing.ObtenerFpsConfigurado());
 
         if (audioMusicaSource != null)
         {
@@ -590,7 +611,14 @@ public class LanePlayerControllerCurvo : MonoBehaviour
 
     void ManejarInputPantallaInicio()
     {
-        int totalOpciones = mostrarSelectorNiveles ? 3 : 2;
+        if (enMenuAjustes)
+        {
+            ManejarInputMenuAjustes();
+            return;
+        }
+
+        int totalOpciones = mostrarSelectorNiveles ? 4 : 3;
+        opcionMenuInicioSeleccionada = Mathf.Clamp(opcionMenuInicioSeleccionada, 0, totalOpciones - 1);
 
         if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow))
         {
@@ -617,7 +645,9 @@ public class LanePlayerControllerCurvo : MonoBehaviour
             return;
         }
 
-        if (mostrarSelectorNiveles && opcion == 1)
+        int idx = 1;
+
+        if (mostrarSelectorNiveles && opcion == idx)
         {
             enPantallaInicio = false;
             enSelectorNivel = true;
@@ -625,10 +655,84 @@ public class LanePlayerControllerCurvo : MonoBehaviour
             return;
         }
 
+        if (mostrarSelectorNiveles)
+            idx++;
+
+        if (opcion == idx)
+        {
+            enMenuAjustes = true;
+            opcionMenuAjustesSeleccionada = 0;
+            indicePresetFpsSeleccionado = ObtenerIndicePresetMasCercano(RuntimeFramePacing.ObtenerFpsConfigurado());
+            return;
+        }
+
         Application.Quit();
 #if UNITY_EDITOR
         Debug.Log("Salir presionado (en editor no se cierra la aplicacion).");
 #endif
+    }
+
+    void ManejarInputMenuAjustes()
+    {
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            enMenuAjustes = false;
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow))
+        {
+            opcionMenuAjustesSeleccionada = (opcionMenuAjustesSeleccionada - 1 + 2) % 2;
+        }
+
+        if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow))
+        {
+            opcionMenuAjustesSeleccionada = (opcionMenuAjustesSeleccionada + 1) % 2;
+        }
+
+        if (opcionMenuAjustesSeleccionada == 0)
+        {
+            if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow))
+            {
+                CambiarPresetFps(-1);
+            }
+
+            if (Input.GetKeyDown(KeyCode.D) || Input.GetKeyDown(KeyCode.RightArrow))
+            {
+                CambiarPresetFps(1);
+            }
+        }
+
+        if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space))
+        {
+            if (opcionMenuAjustesSeleccionada == 1)
+            {
+                enMenuAjustes = false;
+            }
+        }
+    }
+
+    int ObtenerIndicePresetMasCercano(int fpsActual)
+    {
+        int indice = 0;
+        int mejorDelta = int.MaxValue;
+        for (int i = 0; i < presetsFps.Length; i++)
+        {
+            int delta = Mathf.Abs(presetsFps[i] - fpsActual);
+            if (delta < mejorDelta)
+            {
+                mejorDelta = delta;
+                indice = i;
+            }
+        }
+
+        return indice;
+    }
+
+    void CambiarPresetFps(int direccion)
+    {
+        indicePresetFpsSeleccionado = (indicePresetFpsSeleccionado + direccion + presetsFps.Length) % presetsFps.Length;
+        RuntimeFramePacing.ConfigurarFps(presetsFps[indicePresetFpsSeleccionado]);
     }
 
     void DibujarMenuInicioProfesional()
@@ -674,7 +778,7 @@ public class LanePlayerControllerCurvo : MonoBehaviour
             estiloMenuBoton = new GUIStyle(GUI.skin.button);
             estiloMenuBoton.alignment = TextAnchor.MiddleCenter;
             estiloMenuBoton.fontStyle = FontStyle.Bold;
-            estiloMenuBoton.fontSize = Mathf.RoundToInt(28f * escalaTituloMenu);
+            estiloMenuBoton.fontSize = Mathf.RoundToInt(24f * escalaTituloMenu);
             estiloMenuBoton.normal.textColor = new Color(0.95f, 0.97f, 1f, 1f);
             estiloMenuBoton.hover.textColor = Color.white;
             estiloMenuBoton.active.textColor = Color.white;
@@ -721,15 +825,15 @@ public class LanePlayerControllerCurvo : MonoBehaviour
         estiloMenuSubtitulo.normal.textColor = new Color(0.78f, 0.87f, 0.93f, 0.92f);
         GUI.Label(new Rect(centerX - 430f, subtitleY, 860f, 80f), subtituloJuego, estiloMenuSubtitulo);
 
-        float btnW = 380f;
-        float btnH = 64f;
+        float btnW = 350f;
+        float btnH = 56f;
         float btnX = centerX - (btnW * 0.5f);
-        float btnY = Screen.height * 0.58f;
-        float btnGap = 20f;
+        float btnY = Screen.height * 0.57f;
+        float btnGap = 16f;
 
         string[] labels = mostrarSelectorNiveles
-            ? new string[] { "START", "LEVEL SELECT", "QUIT" }
-            : new string[] { "START", "QUIT" };
+            ? new string[] { "START", "LEVEL SELECT", "SETTINGS", "QUIT" }
+            : new string[] { "START", "SETTINGS", "QUIT" };
 
         for (int i = 0; i < labels.Length; i++)
         {
@@ -770,10 +874,131 @@ public class LanePlayerControllerCurvo : MonoBehaviour
         estiloMenuAyuda.normal.textColor = new Color(0.72f, 0.80f, 0.88f, 0.92f);
         GUI.Label(
             new Rect(0f, Screen.height - 48f, Screen.width, 32f),
-            "Use W/S o Flechas para navegar, ENTER para confirmar",
+            "Use W/S para navegar, ENTER para confirmar, ESC para volver",
             estiloMenuAyuda);
 
         GUI.color = Color.white;
+    }
+
+    void DibujarMenuAjustes()
+    {
+        if (texturaBlancaUI == null)
+        {
+            texturaBlancaUI = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            texturaBlancaUI.SetPixel(0, 0, Color.white);
+            texturaBlancaUI.Apply();
+        }
+
+        GUI.color = Color.black;
+        GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), texturaBlancaUI);
+
+        float centerX = Screen.width * 0.5f;
+        float panelW = 640f;
+        float panelH = 340f;
+        Rect panel = new Rect(centerX - panelW * 0.5f, Screen.height * 0.5f - panelH * 0.5f, panelW, panelH);
+
+        GUI.color = new Color(0.08f, 0.14f, 0.20f, 0.92f);
+        GUI.DrawTexture(panel, texturaBlancaUI);
+
+        GUI.color = new Color(colorNeonMenu.r, colorNeonMenu.g, colorNeonMenu.b, 0.9f);
+        GUI.DrawTexture(new Rect(panel.x, panel.y, panel.width, 2f), texturaBlancaUI);
+        GUI.DrawTexture(new Rect(panel.x, panel.yMax - 2f, panel.width, 2f), texturaBlancaUI);
+
+        GUI.color = Color.white;
+        GUIStyle titulo = new GUIStyle(GUI.skin.label);
+        titulo.alignment = TextAnchor.MiddleCenter;
+        titulo.fontStyle = FontStyle.Bold;
+        titulo.fontSize = 44;
+        titulo.normal.textColor = new Color(0.90f, 0.95f, 1f, 1f);
+        GUI.Label(new Rect(panel.x, panel.y + 20f, panel.width, 48f), "SETTINGS", titulo);
+
+        GUIStyle subtitulo = new GUIStyle(GUI.skin.label);
+        subtitulo.alignment = TextAnchor.MiddleCenter;
+        subtitulo.fontSize = 22;
+        subtitulo.normal.textColor = new Color(0.75f, 0.86f, 0.94f, 1f);
+        GUI.Label(new Rect(panel.x, panel.y + 86f, panel.width, 36f), "FPS LIMIT", subtitulo);
+
+        int fpsActual = RuntimeFramePacing.ObtenerFpsConfigurado();
+        indicePresetFpsSeleccionado = ObtenerIndicePresetMasCercano(fpsActual);
+
+        float rowY = panel.y + 140f;
+        float btnSmallW = 72f;
+        float btnSmallH = 48f;
+        float valorW = 190f;
+        float totalW = btnSmallW + 18f + valorW + 18f + btnSmallW;
+        float startX = centerX - totalW * 0.5f;
+
+        bool filaSeleccionada = opcionMenuAjustesSeleccionada == 0;
+        if (GUI.Button(new Rect(startX, rowY, btnSmallW, btnSmallH), "<"))
+        {
+            CambiarPresetFps(-1);
+        }
+
+        Color valorColor = filaSeleccionada
+            ? new Color(0.10f, 0.28f, 0.40f, 0.95f)
+            : new Color(0.06f, 0.16f, 0.24f, 0.90f);
+        GUI.color = valorColor;
+        GUI.DrawTexture(new Rect(startX + btnSmallW + 18f, rowY, valorW, btnSmallH), texturaBlancaUI);
+        GUI.color = Color.white;
+
+        GUIStyle valor = new GUIStyle(GUI.skin.label);
+        valor.alignment = TextAnchor.MiddleCenter;
+        valor.fontStyle = FontStyle.Bold;
+        valor.fontSize = 24;
+        valor.normal.textColor = Color.white;
+        GUI.Label(new Rect(startX + btnSmallW + 18f, rowY, valorW, btnSmallH), fpsActual + " FPS", valor);
+
+        if (GUI.Button(new Rect(startX + btnSmallW + 18f + valorW + 18f, rowY, btnSmallW, btnSmallH), ">"))
+        {
+            CambiarPresetFps(1);
+        }
+
+        float chipW = 88f;
+        float chipH = 36f;
+        float chipGap = 10f;
+        float chipsTotal = presetsFps.Length * chipW + (presetsFps.Length - 1) * chipGap;
+        float chipsX = centerX - chipsTotal * 0.5f;
+        float chipsY = rowY + 66f;
+
+        for (int i = 0; i < presetsFps.Length; i++)
+        {
+            bool selected = i == indicePresetFpsSeleccionado;
+            GUI.color = selected
+                ? new Color(colorNeonMenu.r, colorNeonMenu.g, colorNeonMenu.b, 0.35f)
+                : Color.white;
+
+            if (GUI.Button(new Rect(chipsX + i * (chipW + chipGap), chipsY, chipW, chipH), presetsFps[i].ToString()))
+            {
+                indicePresetFpsSeleccionado = i;
+                RuntimeFramePacing.ConfigurarFps(presetsFps[i]);
+            }
+        }
+
+        GUI.color = Color.white;
+
+        float volverW = 220f;
+        float volverH = 46f;
+        Rect btnVolver = new Rect(centerX - volverW * 0.5f, panel.yMax - volverH - 24f, volverW, volverH);
+        if (opcionMenuAjustesSeleccionada == 1)
+        {
+            GUI.color = new Color(colorNeonMenu.r, colorNeonMenu.g, colorNeonMenu.b, 0.30f);
+            GUI.DrawTexture(new Rect(btnVolver.x - 3f, btnVolver.y - 3f, btnVolver.width + 6f, btnVolver.height + 6f), texturaBlancaUI);
+            GUI.color = Color.white;
+        }
+        if (GUI.Button(btnVolver, "BACK"))
+        {
+            enMenuAjustes = false;
+            opcionMenuAjustesSeleccionada = 0;
+        }
+
+        GUIStyle ayuda = new GUIStyle(GUI.skin.label);
+        ayuda.alignment = TextAnchor.MiddleCenter;
+        ayuda.fontSize = 15;
+        ayuda.normal.textColor = new Color(0.73f, 0.82f, 0.90f, 0.95f);
+        GUI.Label(
+            new Rect(0f, Screen.height - 44f, Screen.width, 30f),
+            "A/D o Flechas para cambiar FPS, W/S para navegar, ENTER para volver",
+            ayuda);
     }
 
     void DibujarOscurecimiento()
@@ -812,8 +1037,9 @@ public class LanePlayerControllerCurvo : MonoBehaviour
     void LateUpdate()
     {
         if (camaraPipeRiders == null) return;
+
         Vector3 tangente = transform.forward;
-        float distanciaCamaraAjustada = radioTunel * 1.08f;
+        float distanciaCamaraAjustada = radioTunel * 1.08f * multiplicadorDistanciaCamara;
         float alturaCamaraAjustada = radioTunel * 0.32f;
         Vector3 centroTunel = posBaseCamara;
         Vector3 upCamara = (-transform.up).normalized;
@@ -912,23 +1138,13 @@ public class LanePlayerControllerCurvo : MonoBehaviour
                 -2.5f,
                 2.5f);
 
-            int carrilAnterior = carrilActual;
-
             carrilActual = (carrilActual + direccion + numCarriles) % numCarriles;
-
-            if (Mathf.Abs(carrilActual - carrilAnterior) > numCarriles / 2)
-            {
-                if (direccion > 0 && carrilActual < carrilAnterior)
-                    carrilInterpolado += numCarriles;
-
-                else if (direccion < 0 && carrilActual > carrilAnterior)
-                    carrilInterpolado -= numCarriles;
-            }
+            carrilObjetivoInterpolado += direccion;
         }
 
         carrilInterpolado = Mathf.Lerp(
             carrilInterpolado,
-            carrilActual,
+            carrilObjetivoInterpolado,
             suavizadoCambioCarril);
 
         impulsoInclinacionVisual = Mathf.MoveTowards(
@@ -1037,6 +1253,7 @@ public class LanePlayerControllerCurvo : MonoBehaviour
 
         carrilActual = numCarriles / 2;
         carrilInterpolado = carrilActual;
+        carrilObjetivoInterpolado = carrilActual;
         avanceCurva = 0f;
         velocidadActual = 0f;
         tiempoPreinicio = Mathf.Max(0f, duracionCuentaRegresiva) + Mathf.Max(0f, duracionTextoGo);
@@ -1222,7 +1439,7 @@ public class LanePlayerControllerCurvo : MonoBehaviour
         Vector3 eulerAnim = Vector3.zero;
         if (animarVisualMoto)
         {
-            float errorCarril = Mathf.Clamp(carrilActual - carrilInterpolado, -1f, 1f);
+            float errorCarril = Mathf.Clamp(carrilObjetivoInterpolado - carrilInterpolado, -1f, 1f);
             float inclinacionObjetivo = Mathf.Clamp(
                 (errorCarril * 0.55f + impulsoInclinacionVisual) * inclinacionMaximaVisual,
                 -inclinacionMaximaVisual,
